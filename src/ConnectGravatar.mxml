@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ▇ ▅ █ ▅ ▇ ▂ ▃ ▁ ▁ ▅ ▃ ▅ ▅ ▄ ▅ ▇ ▇ ▅ █ ▅ ▇ ▂ ▃ ▁ ▁ ▅ ▃ ▅ ▅ ▄ 
+
+	Connect Gravatar
+
+	by Vincent Le Quang (vincentlequang@gmail.com)
+
+	License: Feel free to do whatever the hell you want with this code.
+
+
+    ▇ ▅ █ ▅ ▇ ▂ ▃ ▁ ▁ ▅ ▃ ▅ ▅ ▄ ▅ ▇ ▇ ▅ █ ▅ ▇ ▂ ▃ ▁ ▁ ▅ ▃ ▅ ▅ ▄ -->
+
+
+
+
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" 
+				xmlns:components="com.adobe.sync.components.*" 
+			 	initialize="init(event)"
+				verticalScrollPolicy="off" horizontalScrollPolicy="off">
+	<mx:Script>
+		<![CDATA[
+			import com.adobe.sync.events.SyncSwfEvent;
+			
+			import by.blooddy.crypto.MD5;
+			
+			private var selfImagesURL:Array;
+			private var correctTime:int;
+			
+			[Bindable] private var loader:Loader;
+			[Bindable] private var language:String = Capabilities.language;
+			[Bindable] private var imageURL:String;
+			[Bindable] private var windowWidth:Number;
+			[Bindable] private var windowHeight:Number;
+			[Bindable] private var loaderWidth:Number;
+			[Bindable] private var loaderHeight:Number;
+			[Bindable] private var participantsCanPlay:Boolean = true;
+			[Bindable] private var participantsCanCustomize:Boolean = false;
+			[Bindable] private var isParticipant:Boolean = false;
+			[Bindable] private var customURL:String = null;
+			[Bindable] private var connectVersion:String = null;
+			
+			
+			[Embed(source="connect.png")] 
+			[Bindable] 
+			public var imgCls:Class;
+			
+			/****************************************************
+			 * function init
+			 */
+			protected function init(event:Event):void
+			{
+				fetchLogin();
+			}
+			
+			/****************************************************
+			 * function onCaughtUp
+			 * Initialize variables when the SyncConnector is ready
+			 */
+			protected function onCaughtUp(event:SyncSwfEvent):void
+			{
+				language = syncConnector.language;
+				imageURL = syncConnector.userID + "," + syncConnector.userName;
+				syncConnector.allowParticipantPublish("gravatar",true);
+				syncConnector.setPodControlsVisibility(syncConnector.role!=SyncConnector.k_PARTICIPANT);
+				connectVersion = syncConnector.connectVersion;
+			}
+			
+			/****************************************************
+			 * function onClick
+			 * Clicked the image
+			 */
+			protected function onClick(event:MouseEvent):void
+			{
+				shareAvatar(customURL ? [customURL] : selfImagesURL);
+			}
+			
+			/****************************************************
+			 * function shareAvatar
+			 * dispatch the message to update the avatar image for all users
+			 */
+			private function shareAvatar(urls:Array):void {
+				if(participantsCanPlay || !isParticipant)
+					syncConnector.dispatchSyncMessage("gravatar",urls,false,true);
+			}
+			
+			/****************************************************
+			 * function onMessage
+			 * Received a message from syncConnector
+			 */
+			private function onMessage(e:SyncSwfEvent):void {
+				switch(e.data.msgNm) {
+					case "gravatar":
+						loadImage(getTimer(),e.data.msgVal);
+						break;
+					case "participation":
+						participantsCanPlay = e.data.msgVal;
+						break;
+					case "customization":
+						participantsCanCustomize = e.data.msgVal;
+						break;
+				}
+			}
+			
+			/****************************************************
+			 * function fetchLogin
+			 * Check common-info to fetch out the email
+			 */
+			private function fetchLogin():void {
+				var urlloader:URLLoader = new URLLoader();
+				var request:URLRequest = new URLRequest("/api/xml?action=common-info");
+				urlloader.addEventListener(Event.COMPLETE,
+					function(e:Event):void {
+						var xml:XML = new XML((e.currentTarget as URLLoader).data);
+						var email:String = xml.common.user.login.text();
+						var split:Array = email.split("@");
+						selfImagesURL = [];
+						switch(split[1]) {
+							case "adobe.com":
+								selfImagesURL.push("https://img.corp.adobe.com:8443/is/image/"+split[0]+".00.jpg");
+								break;
+						}
+						selfImagesURL.push("http://www.gravatar.com/avatar/"+MD5.hash(email.split(" ").join("").toLowerCase()));
+					});
+				urlloader.addEventListener(IOErrorEvent.IO_ERROR,
+					function(e:IOErrorEvent):void {
+						
+					});
+				urlloader.load(request);
+			}
+			
+			/****************************************************
+			 * function loadImage
+			 * loads an image. It takes all the urls of the array in order, and stops when it loads one
+			 * successfully. The timestamp is used to stop pending loads if this function is called
+			 * while an image is still loading
+			 */
+			private function loadImage(timestamp:int,urls:Array):void {
+				correctTime = timestamp;
+				var tempLoader:Loader = new Loader();
+				tempLoader.contentLoaderInfo.addEventListener(Event.COMPLETE,
+					function(e:Event):void {
+						try {
+							if(!(tempLoader.content is Image))
+								return;
+						}
+						catch(e:Error) {
+						}
+						
+						if(correctTime==timestamp) {
+							loader = tempLoader;
+							loaderWidth = loader.width;
+							loaderHeight = loader.height;
+						}
+					});
+				tempLoader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR,
+					function(e:IOErrorEvent):void {
+						if(correctTime==timestamp && urls.length) {
+							tempLoader.load(new URLRequest(urls.shift()));
+						}
+					});
+				tempLoader.load(new URLRequest(urls.shift()));
+			}
+			
+			/****************************************************
+			 * function getTip
+			 * Show a tooltip depending on the language. Support French and English (default)
+			 */
+			private function getTip(language:String):String
+			{
+				switch(language) {
+					case "fr":
+						return participantsCanPlay || !isParticipant ? "Cliquez sur l'image pour montrer votre avatar" : null;
+						break;
+					default:
+						return participantsCanPlay || !isParticipant ? "Click on the image to show your avatar" : null;
+				}
+			}
+			
+			/****************************************************
+			 * function onResize
+			 * pod size changed
+			 */
+			protected function onResize(event:Event):void
+			{
+				windowWidth = width;
+				windowHeight = height;
+			}
+			
+			/****************************************************
+			 * function onRole
+			 * user's role changed
+			 */
+			protected function onRole(event:SyncSwfEvent):void
+			{
+				syncConnector.setPodControlsVisibility(syncConnector.role!=SyncConnector.k_PARTICIPANT);
+				checkboxParticipation.visible = syncConnector.role==SyncConnector.k_HOST;
+				checkboxCustomize.visible = syncConnector.role==SyncConnector.k_HOST;
+				isParticipant = syncConnector.role==SyncConnector.k_PARTICIPANT;
+			}
+			
+			/****************************************************
+			 * function onChangeParticipation
+			 * The host allowed/disallowed participants to show their avatar
+			 */
+			private function onChangeParticipation(event:Event):void {
+				syncConnector.dispatchSyncMessage("participation",(event.currentTarget as CheckBox).selected,false,true);
+			}
+			
+			/****************************************************
+			 * function onChangeCustomization
+			 * The host allowed/disallowed participants to show custom urls as their avatar
+			 */
+			private function onChangeCustomization(event:Event):void {
+				syncConnector.dispatchSyncMessage("customization",(event.currentTarget as CheckBox).selected,false,true);
+			}
+			
+			/****************************************************
+			 * function onFocus
+			 * Clicked into the URL textfield or clicked out of it
+			 */
+			protected function onFocus(event:FocusEvent):void
+			{
+				if(event.type==FocusEvent.FOCUS_IN) {
+					customImageURL.setSelection(0,customImageURL.length);
+				}
+				else {
+					customImageURL.setSelection(0,0);
+				}				
+			}
+			
+			/****************************************************
+			 * function findColor
+			 * Gray if there's no URL entered, otherwise black
+			 */
+			private function findColor(text:String):uint {
+				return text==defaultPasteText?0xDDDDDD:0;
+			}
+			
+			/****************************************************
+			 * function onKey
+			 * Event for pressing ENTER
+			 */
+			protected function onKey(event:KeyboardEvent):void
+			{
+				if(event.keyCode==Keyboard.ENTER) {
+					onShare(null);
+				}
+			}
+			
+			/****************************************************
+			 * function onShare
+			 * Sharing a custom URL as the avatar
+			 */
+			protected function onShare(event:MouseEvent):void
+			{
+				customURL = customImageURL.text;
+				shareAvatar([customURL]);
+			}
+			
+			/****************************************************
+			 * function onClear
+			 * Removes the image url that you shared from the textfield
+			 * Note that it doesn't change the image. However, clicking on the image will show your default avatar, not your custom one
+			 */
+			protected function onClear(event:MouseEvent):void
+			{
+				customURL = null;
+				customImageURL.text = defaultPasteText;
+			}
+			
+			
+		]]>
+	</mx:Script>
+	<!-- SyncConnector used to connect into Connect -->
+	<components:SyncConnector id="syncConnector" caughtUp="onCaughtUp(event)" syncMessageReceived="onMessage(event)" roleChanged="onRole(event)"
+							  sizeChanged="onResize(event)"/>
+	
+	<!-- The image, which uses the loader as the source -->
+	<mx:Image id="image" source="{loader?loader:imgCls}" click="onClick(event)" buttonMode="{participantsCanPlay || !isParticipant}" toolTip="{getTip(language)}"
+			  width="{.8*loaderWidth*Math.min(windowWidth/loaderWidth,windowHeight/loaderHeight)}" 
+			  height="{.8*loaderHeight*Math.min(windowWidth/loaderWidth,windowHeight/loaderHeight)}"
+			  verticalAlign="top"
+			  />
+	<mx:Label visible="{!connectVersion}" color="0xcc00000" text="{language!='fr'?'This swf must be uploaded in Adobe Connect. In Connect, click [Share Document] and select this swf file.':'Ce fichier swf doit être téléchargé dans Adobe Connect. Dans Connect, cliquez [Partager document], et selectionez ce fichier.'}"/>
+	
+	<!-- Options for admin, or for showing custom image urls -->
+	<mx:Spacer height="20"/>
+	<mx:CheckBox id="checkboxParticipation" label="{language!='fr'?'Let participants share their avatar':'Permettre aux participants de partager leur avatar'}" selected="{participantsCanPlay}" click="onChangeParticipation(event)"/>
+	<mx:CheckBox id="checkboxCustomize" label="{language!='fr'?'Let participants share custom images':'Permettre aux participants de partager des images de l\'internet'}" selected="{participantsCanCustomize}" click="onChangeCustomization(event)" enabled="{participantsCanPlay}"/>
+	<mx:String id="defaultPasteText">{language!='fr'?"Enter an image url":"Entrez un lien d'image"}</mx:String>
+	<mx:TextInput id="customImageURL" text="{defaultPasteText}" keyDown="onKey(event)" color="{findColor(customImageURL.text)}" focusIn="onFocus(event)" focusOut="onFocus(event)"
+				  visible="{!isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}"/>
+	<mx:HBox  visible="{!isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}">
+		<mx:Button id="customImageButton" label="{language!='fr'?'Share':'Partage'}" click="onShare(event)"/>
+		<mx:Button id="customImageClear" label="{language!='fr'?'Clear':'Effacer'}" click="onClear(event)"/>
+	</mx:HBox>
+	
+		
+</mx:Application>
