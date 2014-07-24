@@ -16,7 +16,8 @@
 <mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" 
 				xmlns:components="com.adobe.sync.components.*" 
 			 	initialize="init(event)"
-				verticalScrollPolicy="off" horizontalScrollPolicy="off">
+				verticalScrollPolicy="off" horizontalScrollPolicy="off"
+			    rollOver="onRoll(event)" rollOut="onRoll(event)">
 	<mx:Script>
 		<![CDATA[
 			import com.adobe.sync.events.SyncSwfEvent;
@@ -24,20 +25,21 @@
 			import by.blooddy.crypto.MD5;
 			
 			private var selfImagesURL:Array;
-			private var correctTime:int;
+			private var stampID:String;
 			
 			[Bindable] private var loader:Loader;
 			[Bindable] private var language:String = Capabilities.language;
 			[Bindable] private var imageURL:String;
 			[Bindable] private var windowWidth:Number;
 			[Bindable] private var windowHeight:Number;
-			[Bindable] private var loaderWidth:Number;
-			[Bindable] private var loaderHeight:Number;
+			[Bindable] private var loaderWidth:Number = 256;
+			[Bindable] private var loaderHeight:Number = 256;
 			[Bindable] private var participantsCanPlay:Boolean = true;
 			[Bindable] private var participantsCanCustomize:Boolean = false;
 			[Bindable] private var isParticipant:Boolean = false;
+			[Bindable] private var isHost:Boolean = false;
 			[Bindable] private var customURL:String = null;
-			[Bindable] private var connectVersion:String = null;
+			[Bindable] private var mouseHovered:Boolean = false;
 			
 			
 			[Embed(source="connect.png")] 
@@ -62,7 +64,6 @@
 				imageURL = syncConnector.userID + "," + syncConnector.userName;
 				syncConnector.allowParticipantPublish("gravatar",true);
 				syncConnector.setPodControlsVisibility(syncConnector.role!=SyncConnector.k_PARTICIPANT);
-				connectVersion = syncConnector.connectVersion;
 			}
 			
 			/****************************************************
@@ -90,7 +91,7 @@
 			private function onMessage(e:SyncSwfEvent):void {
 				switch(e.data.msgNm) {
 					case "gravatar":
-						loadImage(getTimer(),e.data.msgVal);
+						loadImage(e.data.msgVal);
 						break;
 					case "participation":
 						participantsCanPlay = e.data.msgVal;
@@ -134,31 +135,38 @@
 			 * successfully. The timestamp is used to stop pending loads if this function is called
 			 * while an image is still loading
 			 */
-			private function loadImage(timestamp:int,urls:Array):void {
-				correctTime = timestamp;
-				var tempLoader:Loader = new Loader();
-				tempLoader.contentLoaderInfo.addEventListener(Event.COMPLETE,
-					function(e:Event):void {
-						try {
-							if(!(tempLoader.content is Image))
-								return;
-						}
-						catch(e:Error) {
-						}
-						
-						if(correctTime==timestamp) {
-							loader = tempLoader;
-							loaderWidth = loader.width;
-							loaderHeight = loader.height;
-						}
-					});
-				tempLoader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR,
-					function(e:IOErrorEvent):void {
-						if(correctTime==timestamp && urls.length) {
-							tempLoader.load(new URLRequest(urls.shift()));
-						}
-					});
-				tempLoader.load(new URLRequest(urls.shift()));
+			private function loadImage(urls:Array):void {
+				var stamp:String = MD5.hash(urls.join("|"));
+				if(stampID==stamp) {
+					stampID = null;
+					loader = null;
+				}
+				else {
+					stampID = stamp;
+					var tempLoader:Loader = new Loader();
+					tempLoader.contentLoaderInfo.addEventListener(Event.COMPLETE,
+						function(e:Event):void {
+							try {
+								if(!(tempLoader.content is Image))
+									return;
+							}
+							catch(e:Error) {
+							}
+							
+							if(stamp==stampID) {
+								loader = tempLoader;
+								loaderWidth = loader.width;
+								loaderHeight = loader.height;
+							}
+						});
+					tempLoader.contentLoaderInfo.addEventListener(IOErrorEvent.IO_ERROR,
+						function(e:IOErrorEvent):void {
+							if(stamp==stampID && urls.length) {
+								tempLoader.load(new URLRequest(urls.shift()));
+							}
+						});
+					tempLoader.load(new URLRequest(urls.shift()));
+				}
 			}
 			
 			/****************************************************
@@ -193,9 +201,8 @@
 			protected function onRole(event:SyncSwfEvent):void
 			{
 				syncConnector.setPodControlsVisibility(syncConnector.role!=SyncConnector.k_PARTICIPANT);
-				checkboxParticipation.visible = syncConnector.role==SyncConnector.k_HOST;
-				checkboxCustomize.visible = syncConnector.role==SyncConnector.k_HOST;
 				isParticipant = syncConnector.role==SyncConnector.k_PARTICIPANT;
+				isHost = syncConnector.role==SyncConnector.k_HOST;
 			}
 			
 			/****************************************************
@@ -269,6 +276,11 @@
 			}
 			
 			
+			protected function onRoll(event:MouseEvent):void
+			{
+				mouseHovered = event.type==MouseEvent.ROLL_OVER;
+			}
+			
 		]]>
 	</mx:Script>
 	<!-- SyncConnector used to connect into Connect -->
@@ -279,21 +291,20 @@
 	<mx:Image id="image" source="{loader?loader:imgCls}" click="onClick(event)" buttonMode="{participantsCanPlay || !isParticipant}" toolTip="{getTip(language)}"
 			  width="{.8*loaderWidth*Math.min(windowWidth/loaderWidth,windowHeight/loaderHeight)}" 
 			  height="{.8*loaderHeight*Math.min(windowWidth/loaderWidth,windowHeight/loaderHeight)}"
-			  verticalAlign="top"
+			  verticalAlign="top" horizontalAlign="center"
 			  />
-	<mx:Label visible="{!connectVersion}" color="0xcc00000" text="{language!='fr'?'This swf must be uploaded in Adobe Connect. In Connect, click [Share Document] and select this swf file.':'Ce fichier swf doit être téléchargé dans Adobe Connect. Dans Connect, cliquez [Partager document], et selectionez ce fichier.'}"/>
-	
-	<!-- Options for admin, or for showing custom image urls -->
-	<mx:Spacer height="20"/>
-	<mx:CheckBox id="checkboxParticipation" label="{language!='fr'?'Let participants share their avatar':'Permettre aux participants de partager leur avatar'}" selected="{participantsCanPlay}" click="onChangeParticipation(event)"/>
-	<mx:CheckBox id="checkboxCustomize" label="{language!='fr'?'Let participants share custom images':'Permettre aux participants de partager des images de l\'internet'}" selected="{participantsCanCustomize}" click="onChangeCustomization(event)" enabled="{participantsCanPlay}"/>
+
 	<mx:String id="defaultPasteText">{language!='fr'?"Enter an image url":"Entrez un lien d'image"}</mx:String>
 	<mx:TextInput id="customImageURL" text="{defaultPasteText}" keyDown="onKey(event)" color="{findColor(customImageURL.text)}" focusIn="onFocus(event)" focusOut="onFocus(event)"
-				  visible="{!isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}"/>
-	<mx:HBox  visible="{!isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}">
+				  visible="{isHost?true:!mouseHovered ? false : !isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}"/>
+	<mx:HBox visible="{isHost?true:!mouseHovered ? false : !isParticipant || (participantsCanPlay ? participantsCanCustomize : false)}">
 		<mx:Button id="customImageButton" label="{language!='fr'?'Share':'Partage'}" click="onShare(event)"/>
 		<mx:Button id="customImageClear" label="{language!='fr'?'Clear':'Effacer'}" click="onClear(event)"/>
 	</mx:HBox>
+	<!-- Options for admin, or for showing custom image urls -->
+	<mx:CheckBox id="checkboxParticipation" visible="{isHost}" includeInLayout="{isHost}" label="{language!='fr'?'Let participants share their avatar':'Permettre aux participants de partager leur avatar'}" selected="{participantsCanPlay}" click="onChangeParticipation(event)"/>
+	<mx:CheckBox id="checkboxCustomize" visible="{isHost}" includeInLayout="{isHost}" label="{language!='fr'?'Let participants share custom images':'Permettre aux participants de partager des images de l\'internet'}" selected="{participantsCanCustomize}" click="onChangeCustomization(event)" enabled="{participantsCanPlay}"/>
+	
 	
 		
 </mx:Application>
